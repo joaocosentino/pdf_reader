@@ -14,6 +14,9 @@ class PDFReaderDB:
 embeddings = OllamaEmbeddings(model="nomic-embed-text", show_progress=True)
 
 def add_collection(file_path, collection_name):
+  '''
+
+  '''
   load_dotenv('.env.local')
 
   storage_path = os.getenv('STORAGE_PATH')
@@ -44,9 +47,12 @@ def add_collection(file_path, collection_name):
   print(f'File {file_path} uploaded to collection {collection_name}')
 
 def get_vector_store(collection_name):
+  '''
+
+  '''
   persistent_client = chromadb.PersistentClient(path='chromadb')
   return Chroma(client=persistent_client,
                 collection_name=collection_name,
                 embedding_function=embeddings)
 
-add_collection('pdf_files/owner_manual_p283-p300.pdf', 'short_manual')
+add_collection('pdf_files/Owners_Manual-Ram_1500_25_Crew_Cab.pdf', 'owner_manual')
