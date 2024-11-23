@@ -1,8 +1,9 @@
 import pdfplumber
+from langchain.schema import Document
 
 def extract_sections_by_bold_font(pdf_path):
-    sections = []  # To store sections
     current_section = {"title": None, "content": ""}
+    documents = []
     
     with pdfplumber.open(pdf_path) as pdf:
         for page_number, page in enumerate(pdf.pages, start=1):
@@ -18,7 +19,10 @@ def extract_sections_by_bold_font(pdf_path):
                 if is_bold and not(creating_title):
                     # If we encounter bold text and already have a section, close it
                     if current_section["title"]:
-                        sections.append(current_section)
+                        document = Document(page_content=current_section["content"],
+                                            metadata={"page": page_number,
+                                                      "section": current_section["title"]})
+                        documents.append(document)
                         current_section = {"title": None, "content": ""}
                         prev_y = None
 
@@ -43,9 +47,12 @@ def extract_sections_by_bold_font(pdf_path):
 
     # Append the last section, if any
     if current_section["title"]:
-        sections.append(current_section)
+        document = Document(page_content=current_section["content"],
+                            metadata={"page": page_number,
+                                      "section": current_section["title"]})
+        documents.append(document)
 
-    return sections
+    return documents
 
 # Specify your PDF file
 pdf_path = "your_file.pdf"
@@ -53,5 +60,7 @@ sections = extract_sections_by_bold_font('./pdf_files/owner_manual_p283-p300.pdf
 
 # Print extracted sections
 for i, section in enumerate(sections, start=1):
-    print(f"\nSection {i}: {section['title']}")
-    print(f"Content:\n{section['content']}")
+    print(f"\nSection {i}: {section.metadata['section']}")
+    print(f"Content:\n{section.page_content}")
+
+
