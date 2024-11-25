@@ -12,7 +12,24 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_community.chat_models import ChatOllama
 from langchain_core.runnables import RunnablePassthrough
 from langchain.retrievers.multi_query import MultiQueryRetriever
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+
+def extract_pdf_by_chunks(pdf_path):
+    """
+    This function create a list of Document objects that will be passed to a vector database as embeddings.
+    """
+    with pdfplumber.open(pdf_path) as pdf:
+        full_text = ""
+        for page_number, page in enumerate(pdf.pages, start=1):
+            print(f"Processing page {page_number}.")
+            full_text += page.extract_text()+"\n"
+
+        document = Document(page_content=full_text)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=100)
+        chunks = text_splitter.split_documents([document])
+
+        return chunks
 
 def extract_pdf_by_sections(pdf_path):
     """
@@ -24,12 +41,16 @@ def extract_pdf_by_sections(pdf_path):
     with pdfplumber.open(pdf_path) as pdf:
         for page_number, page in enumerate(pdf.pages, start=1):
             # Get character-level data
+            print(f"Page number: {page_number}")
+            page = page.crop((0, 0.25*page.height, page.width, 0.77*page.height)) # focus on the part of the layout that has the content, exclude header and footer
             creating_title = False
             prev_y = None
+
             for char in page.chars:
                 text = char.get("text", "")
                 font_name = char.get("fontname", "")
                 is_bold = "Bold" in font_name  # Adjust based on your PDF's font styles
+                font_size = char["size"]
                 current_y = char["top"]
 
                 if is_bold and not(creating_title):
@@ -59,7 +80,9 @@ def extract_pdf_by_sections(pdf_path):
                             current_section["content"] += " "
                     prev_y = current_y
 
-                    current_section["content"] += text
+                    if(font_size != 7.5):
+                        # do not add legends (size == 7.5)
+                        current_section["content"] += text
 
     # Append the last section, if any
     if current_section["title"]:
@@ -122,44 +145,52 @@ class RAGSystem:
         # Add custom query enhancement logic here if needed
         return user_input
     
+    def _generate_qa_chain(self):
+        if (self.qa_chain is None):
+            if not self.retriever:
+                raise ValueError("Retriever not initialized. Load or process documents first.")
+            
+            print("Generating QA chain.")
+
+            QUERY_PROMPT = PromptTemplate(
+                input_variables=["question"],
+                template="""Your task is to generate five different versions of the given user question to retrieve relevant documents
+                from a vector database. By generating multiple perspectives on the user question, your
+                goal is to help the user overcome some of the limitations of the distance-based
+                similarity search. Provide these alternative questions separated by newlines.
+                Original question: {question}""",
+            )
+            
+            retriever = MultiQueryRetriever.from_llm(
+                self.retriever, 
+                self.llm,
+                prompt=QUERY_PROMPT
+            )
+
+            # RAG prompt
+            template = """Answer the question based ONLY on the following context:
+            {context}
+            Question: {question}
+            """
+            
+            prompt = ChatPromptTemplate.from_template(template)
+            
+            self.qa_chain = (
+                {"context": retriever, "question": RunnablePassthrough()}
+                | prompt
+                | self.llm
+                | StrOutputParser()
+            )
+
     def answer_query(self, query: str) -> str:
         """
         Generate an answer for the given query.
         """
-        if not self.retriever:
-            raise ValueError("Retriever not initialized. Load or process documents first.")
+        self._generate_qa_chain()
         
-        QUERY_PROMPT = PromptTemplate(
-            input_variables=["question"],
-            template="""Your task is to generate five different versions of the given user question to retrieve relevant documents
-            from a vector database. By generating multiple perspectives on the user question, your
-            goal is to help the user overcome some of the limitations of the distance-based
-            similarity search. Provide these alternative questions separated by newlines.
-            Original question: {question}""",
-        )
-        
-        retriever = MultiQueryRetriever.from_llm(
-            self.retriever, 
-            self.llm,
-            prompt=QUERY_PROMPT
-        )
+        print("Answering question.")
 
-        # RAG prompt
-        template = """Answer the question based ONLY on the following context:
-        {context}
-        Question: {question}
-        """
-        
-        prompt = ChatPromptTemplate.from_template(template)
-        
-        chain = (
-            {"context": retriever, "question": RunnablePassthrough()}
-            | prompt
-            | self.llm
-            | StrOutputParser()
-        )
-
-        answer = chain.invoke(query)
+        answer = self.qa_chain.invoke(query)
 
         return answer
     
@@ -177,13 +208,14 @@ class RAGSystem:
 
 # test code
 rag = RAGSystem()
-rag.process_documents(["./pdf_files/owner_manual_p283-p300.pdf"])
+rag.process_documents(["./pdf_files/owner_manual_full.pdf"])
+#rag.load_existing_vector_store()
 
-query = "Where is the hazard warning flashers button?"
-answer = rag.answer_query(query)
-print("Answer:", answer)
+#query = "Where is the hazard warning flashers button?"
+#answer = rag.answer_query(query)
+#print("Answer:", answer)
 
 input_queries = "./support_files/testing_queries.xlsx"
-output_answers = "./support_files/answers.xlsx"
+output_answers = "./support_files/answers_full_by_chunks.xlsx"
 rag.evaluate_queries(input_queries, output_answers)
 
