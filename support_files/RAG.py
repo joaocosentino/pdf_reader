@@ -106,6 +106,12 @@ class RAGSystem:
         self.retriever = None
         self.llm = ChatOllama(model=self.llm_model)
         self.qa_chain = None
+
+    def _generate_retriever(self):
+        """
+        In case we need to adjust the way the retriever is done, we do it in one place.
+        """
+        return self.vector_store.as_retriever(search_kwards={"k": 1})
     
     def process_documents(self, file_paths: list, collection_name="langchain"):
         """
@@ -124,7 +130,7 @@ class RAGSystem:
                                                   persist_directory=self.persist_directory,
                                                   collection_name=collection_name)
         self.vector_store.persist()
-        self.retriever = self.vector_store.as_retriever()
+        self.retriever = self._generate_retriever()
         print(f"Processed and saved {len(documents)} documents.")
     
     def load_existing_vector_store(self, collection_name="langchain"):
@@ -133,7 +139,7 @@ class RAGSystem:
         """
         if os.path.exists(self.persist_directory):
             self.vector_store = Chroma(persist_directory=self.persist_directory, embedding_function=self.embedding_function, collection_name=collection_name)
-            self.retriever = self.vector_store.as_retriever()
+            self.retriever = self._generate_retriever()
             print("Loaded existing vector store.")
         else:
             raise FileNotFoundError("Persist directory not found. Please process documents first.")
@@ -152,20 +158,21 @@ class RAGSystem:
             
             print("Generating QA chain.")
 
-            QUERY_PROMPT = PromptTemplate(
-                input_variables=["question"],
-                template="""Your task is to generate five different versions of the given user question to retrieve relevant documents
-                from a vector database. By generating multiple perspectives on the user question, your
-                goal is to help the user overcome some of the limitations of the distance-based
-                similarity search. Provide these alternative questions separated by newlines.
-                Original question: {question}""",
-            )
+            # QUERY_PROMPT = PromptTemplate(
+            #     input_variables=["question"],
+            #     template="""Your task is to generate five different versions of the given user question to retrieve relevant documents
+            #     from a vector database. By generating multiple perspectives on the user question, your
+            #     goal is to help the user overcome some of the limitations of the distance-based
+            #     similarity search. Provide these alternative questions separated by newlines.
+            #     Original question: {question}""",
+            # )
             
-            retriever = MultiQueryRetriever.from_llm(
-                self.retriever, 
-                self.llm,
-                prompt=QUERY_PROMPT
-            )
+            # retriever = MultiQueryRetriever.from_llm(
+            #     self.retriever, 
+            #     self.llm,
+            #     prompt=QUERY_PROMPT
+            # )
+            retriever = self.retriever
 
             # RAG prompt
             template = """Answer the question based ONLY on the following context:
@@ -208,14 +215,14 @@ class RAGSystem:
 
 # test code
 rag = RAGSystem()
-rag.process_documents(["./pdf_files/owner_manual_full.pdf"])
-#rag.load_existing_vector_store()
+#rag.process_documents(["./pdf_files/owner_manual_full.pdf"])
+rag.load_existing_vector_store()
 
 #query = "Where is the hazard warning flashers button?"
 #answer = rag.answer_query(query)
 #print("Answer:", answer)
 
 input_queries = "./support_files/testing_queries.xlsx"
-output_answers = "./support_files/answers_full_by_chunks.xlsx"
+output_answers = "./support_files/answers_full_by_sections_2.xlsx"
 rag.evaluate_queries(input_queries, output_answers)
 
